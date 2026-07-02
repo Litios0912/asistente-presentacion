@@ -7,6 +7,7 @@
   let wsReconnectTimer = null;
   let lastTranscriptSend = 0;
   let transcriptBuffer = "";
+  let lastAdvice = null;
 
   // DOM refs
   const uploadScreen = document.getElementById("upload-screen");
@@ -20,13 +21,32 @@
   const transcriptText = document.getElementById("transcript-text");
   const confidenceBar = document.getElementById("confidence-bar");
   const confidenceFill = document.getElementById("confidence-fill");
-  const qaBadge = document.getElementById("qa-badge");
 
   // Init
   upload.init();
   speech.init();
 
-  // Upload -> Presentation transition
+  // ===== MAIN TAB SWITCHING =====
+  document.querySelectorAll(".main-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".main-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".main-panel").forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      document.getElementById(`panel-${tab.dataset.panel}`).classList.add("active");
+    });
+  });
+
+  // ===== SUBTAB SWITCHING (inside advice) =====
+  document.querySelectorAll(".subtab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".subtab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".subpanel").forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      document.getElementById(`sub-${tab.dataset.sub}`).classList.add("active");
+    });
+  });
+
+  // ===== UPLOAD -> PRESENTATION =====
   upload.onSessionReady((data) => {
     pres.load(data);
     presTitle.textContent = data.title;
@@ -38,28 +58,29 @@
 
     resetAdvice();
     connectWebSocket(data.session_id);
+    // Show slide panel by default
+    document.querySelector('.main-tab[data-panel="slide"]').click();
   });
 
-  // Analysis ready (from upload auto-analyze)
+  // ===== ANALYSIS READY =====
   document.addEventListener("analysis-ready", (e) => {
     pres.setAnalysis(e.detail);
     const totalQ = e.detail.slides.reduce((sum, s) => sum + (s.questions || []).length, 0);
     if (totalQ > 0) {
-      qaBadge.textContent = `❓${totalQ}`;
+      document.querySelector('.subtab[data-sub="qa"]').textContent = `❓ Q&A (${totalQ})`;
     }
-    // Show key points tab content
-    renderKeyPointsOnSlide();
+    renderSubPanels();
   });
 
-  // Speech events
+  // ===== SPEECH =====
   speech.onTranscript(({ final, interim }) => {
-    const display = interim || final || "—";
-    transcriptText.textContent = display;
+    transcriptText.textContent = interim || final || "—";
 
     if (final) {
       transcriptBuffer += (transcriptBuffer ? " " : "") + final;
       const now = Date.now();
-      if (now - lastTranscriptSend > 1500 && transcriptBuffer.trim()) {
+      // Send every 600ms for faster response
+      if (now - lastTranscriptSend > 600 && transcriptBuffer.trim()) {
         sendTranscript(transcriptBuffer.trim());
         transcriptBuffer = "";
         lastTranscriptSend = now;
@@ -72,14 +93,14 @@
     switch (status) {
       case "listening":
         statusDot.classList.add("listening");
-        statusText.textContent = "Escuchando...";
+        statusText.textContent = "Escuchando";
         btnMic.classList.add("active");
         btnMicText.textContent = "Detener";
         break;
       case "stopped":
         statusText.textContent = "Detenido";
         btnMic.classList.remove("active");
-        btnMicText.textContent = "Iniciar micrófono";
+        btnMicText.textContent = "Iniciar";
         break;
       case "unsupported":
         statusDot.classList.add("error");
@@ -90,14 +111,13 @@
         break;
       case "error":
         statusDot.classList.add("error");
-        statusText.textContent = "Error: " + (message || "desconocido");
+        statusText.textContent = "Error";
         btnMic.classList.remove("active");
         btnMicText.textContent = "Reintentar";
         break;
     }
   });
 
-  // Mic button
   btnMic.addEventListener("click", () => {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       statusText.textContent = "Conectando...";
@@ -106,38 +126,36 @@
     speech.toggle();
   });
 
-  // Slide navigation
+  // ===== SLIDE NAV =====
   document.getElementById("prev-slide").addEventListener("click", () => {
     pres.prevSlide();
     sendSlideChange();
-    renderKeyPointsOnSlide();
+    renderSubPanels();
   });
   document.getElementById("next-slide").addEventListener("click", () => {
     pres.nextSlide();
     sendSlideChange();
-    renderKeyPointsOnSlide();
+    renderSubPanels();
   });
   pres.onSlideChange(() => {
     sendSlideChange();
-    renderKeyPointsOnSlide();
+    renderSubPanels();
   });
 
-  // Tab switching
-  document.querySelectorAll(".tab").forEach(tab => {
-    tab.addEventListener("click", () => {
-      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
-      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
-      tab.classList.add("active");
-      const panel = document.getElementById(`panel-${tab.dataset.tab}`);
-      if (panel) panel.classList.add("active");
-    });
+  // ===== BACK BUTTON =====
+  document.getElementById("btn-back").addEventListener("click", () => {
+    if (speech.listening) speech.stop();
+    if (ws) { ws.close(); ws = null; }
+    presScreen.classList.remove("active");
+    presScreen.classList.add("hidden");
+    uploadScreen.classList.remove("hidden");
+    uploadScreen.classList.add("active");
   });
 
-  // WebSocket
+  // ===== WEBSOCKET =====
   function connectWebSocket(sessionId) {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const url = `${protocol}//${window.location.host}/ws/${sessionId}`;
-
     ws = new WebSocket(url);
 
     ws.onopen = () => {
@@ -146,9 +164,6 @@
       const groqKey = localStorage.getItem("groq_key");
       if (groqKey) {
         ws.send(JSON.stringify({ action: "set_key", key: groqKey }));
-      }
-      if (speech.supported && !speech.listening) {
-        addAdviceItem("✅ Conexión establecida. Presiona el micrófono para comenzar.", "good");
       }
     };
 
@@ -163,9 +178,8 @@
       statusDot.className = "status-dot";
       statusText.textContent = "Desconectado";
       btnMic.classList.remove("active");
-      btnMicText.textContent = "Iniciar micrófono";
+      btnMicText.textContent = "Iniciar";
       if (speech.listening) speech.stop();
-
       if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
       wsReconnectTimer = setTimeout(() => {
         if (pres.sessionId) connectWebSocket(pres.sessionId);
@@ -178,8 +192,10 @@
     };
   }
 
+  // ===== HANDLE MESSAGES =====
   function handleWsMessage(data) {
     if (data.type === "advice") {
+      lastAdvice = data;
       pres.updateCurrentSlide(data.current_slide);
 
       const confidence = data.confidence || 0;
@@ -188,47 +204,44 @@
         (confidence > 0.7 ? " high" : confidence > 0.4 ? " medium" : " low");
       confidenceBar.classList.add("visible");
 
-      let style = "good";
-      if (data.is_question) style = "question";
+      let style = data.is_question ? "question" : "good";
+      let icon = data.is_question ? "❓" : "📖";
 
-      let icon = "📖";
-      if (data.is_question) icon = "❓";
+      let html = `${icon} ${data.advice}`;
 
-      let adviceText = `${icon} ${data.advice}`;
-
-      // Extra info
       if (data.extra_info && data.extra_info.length > 0) {
-        adviceText += '<div class="key-points"><div class="key-points-title">📌 Más información:</div>';
+        html += '<div class="key-points"><div class="key-points-title">📌 Información adicional</div>';
         for (const info of data.extra_info) {
-          adviceText += `<div class="key-point done" style="color:var(--text2)">${info}</div>`;
+          html += `<div class="key-point done" style="color:var(--text2)">${info}</div>`;
         }
-        adviceText += "</div>";
+        html += "</div>";
       }
 
-      // Suggested questions
       if (data.suggested_questions && data.suggested_questions.length > 0) {
-        adviceText += '<div class="key-points"><div class="key-points-title">❓ Posibles preguntas:</div>';
+        html += '<div class="key-points"><div class="key-points-title">❓ Posibles preguntas</div>';
         for (const q of data.suggested_questions) {
-          adviceText += `<div class="key-point missed">${q}</div>`;
+          html += `<div class="key-point missed">${q}</div>`;
         }
-        adviceText += "</div>";
+        html += "</div>";
       }
 
-      // Q&A answer
       if (data.is_question && data.qa_answer) {
-        adviceText += `<div class="advice-item qa-answer" style="margin-top:6px">${data.qa_answer}</div>`;
-        qaBadge.textContent = "💬";
+        html += `<div class="key-points" style="margin-top:6px;padding-top:6px;border-top:1px solid var(--surface2)"><div class="key-points-title">💬 Respuesta sugerida</div><div style="font-size:13px;color:#c084fc;padding:4px 0">${data.qa_answer}</div></div>`;
       }
 
-      addAdviceItem(adviceText, style);
-      updateCoachingTab(data);
+      addAdviceItem(html, style);
+      updateSubPanels(data);
+
+      // Auto-switch to advice tab when advice arrives
+      const adviceTab = document.querySelector('.main-tab[data-panel="advice"]');
+      if (!adviceTab.classList.contains("active")) {
+        adviceTab.click();
+      }
 
     } else if (data.type === "slide_changed") {
       pres.updateCurrentSlide(data.current_slide);
     } else if (data.type === "error") {
       addAdviceItem(`⚠️ ${data.message}`, "off-topic");
-    } else if (data.type === "search_results") {
-      addAdviceItem(`🔍 Resultados de búsqueda para "${data.query}":<br>${data.results.slice(0,3).map(r => `• ${r}`).join("<br>")}`, "good");
     }
   }
 
@@ -242,53 +255,79 @@
 
     adviceBody.insertBefore(item, adviceBody.firstChild);
 
-    while (adviceBody.children.length > 8) {
+    while (adviceBody.children.length > 10) {
       adviceBody.removeChild(adviceBody.lastChild);
     }
   }
 
-  function updateCoachingTab(data) {
-    const panel = document.getElementById("panel-coaching");
-    let html = "";
+  function updateSubPanels(data) {
+    // Subpanel: Info
+    const infoPanel = document.getElementById("sub-info");
+    if (data.advice) {
+      infoPanel.innerHTML = `<div class="kp-section"><div class="kp-section-title">📖 Info</div><div style="font-size:13px;color:var(--text2);line-height:1.6">${data.advice}</div></div>`;
+    }
 
+    // Subpanel: Extra
+    const extraPanel = document.getElementById("sub-extra");
+    let extraHtml = "";
     if (data.extra_info && data.extra_info.length > 0) {
-      html += '<div class="kp-section"><div class="kp-section-title">📌 Información adicional</div><ul class="kp-list">';
+      extraHtml += '<div class="kp-section"><div class="kp-section-title">➕ Datos adicionales</div><ul class="kp-list">';
       for (const info of data.extra_info) {
-        html += `<li>${info}</li>`;
+        extraHtml += `<li>${info}</li>`;
       }
-      html += "</ul></div>";
+      extraHtml += "</ul></div>";
     }
-
     if (data.suggested_questions && data.suggested_questions.length > 0) {
-      html += '<div class="kp-section"><div class="kp-section-title">❓ Posibles preguntas</div><ul class="kp-list">';
+      extraHtml += '<div class="kp-section"><div class="kp-section-title">❓ Preguntas</div><ul class="kp-list">';
       for (const q of data.suggested_questions) {
-        html += `<li style="color:var(--warning)">${q}</li>`;
+        extraHtml += `<li style="color:var(--warning)">${q}</li>`;
       }
-      html += "</ul></div>";
+      extraHtml += "</ul></div>";
     }
+    extraPanel.innerHTML = extraHtml || '<p class="placeholder-sm">Aquí aparecerán datos adicionales y preguntas.</p>';
 
+    // Subpanel: Q&A
+    const qaPanel = document.getElementById("sub-qa");
     if (data.is_question && data.qa_answer) {
-      html += `<div class="kp-section"><div class="kp-section-title">💬 Respuesta sugerida</div><div style="font-size:13px;color:var(--text2);padding:0 8px">${data.qa_answer}</div></div>`;
+      qaPanel.innerHTML = `<div class="kp-section"><div class="kp-section-title">💬 Respuesta</div><div style="font-size:13px;color:#c084fc;line-height:1.6">${data.qa_answer}</div></div>`;
+    } else {
+      // Show prepared Q&A
+      renderQASubPanel();
     }
-
-    if (!html) {
-      html = '<p class="placeholder-sm">Habla para recibir información enriquecida sobre el tema.</p>';
-    }
-
-    panel.innerHTML = html;
   }
 
-  function renderKeyPointsOnSlide() {
-    pres._renderKeyPointsTab();
-    pres._renderQATab();
+  function renderSubPanels() {
+    if (lastAdvice) updateSubPanels(lastAdvice);
+    renderQASubPanel();
+    const panel = document.getElementById("sub-extra");
+    if (!panel.innerHTML || panel.innerHTML.includes("placeholder")) {
+      pres._renderKeyPointsTab();
+    }
+  }
+
+  function renderQASubPanel() {
+    const qaPanel = document.getElementById("sub-qa");
+    const slideAnalysis = pres.analysis?.slides?.find(s => s.number === pres.currentSlide + 1);
+    if (slideAnalysis?.questions?.length > 0) {
+      let html = '<div class="kp-section"><div class="kp-section-title">❓ Q&A preparados</div>';
+      for (const qa of slideAnalysis.questions) {
+        html += `<div class="qa-item"><div class="qa-q">${qa.q}</div><div class="qa-a">${qa.a}</div></div>`;
+      }
+      html += "</div>";
+      qaPanel.innerHTML = html;
+    } else if (!qaPanel.innerHTML || qaPanel.innerHTML.includes("placeholder")) {
+      qaPanel.innerHTML = '<p class="placeholder-sm">No hay Q&A preparados para esta diapositiva.</p>';
+    }
   }
 
   function resetAdvice() {
-    adviceBody.innerHTML = '<div class="advice-welcome"><p>Activa el micrófono y comienza a hablar.</p></div>';
-    document.getElementById("panel-coaching").innerHTML = '<p class="placeholder-sm">Esperando datos del coach...</p>';
+    adviceBody.innerHTML = '<div class="advice-welcome"><p>Activa el micrófono para recibir información en tiempo real.</p></div>';
+    ["sub-info", "sub-extra", "sub-qa"].forEach(id => {
+      document.getElementById(id).innerHTML = '<p class="placeholder-sm">Esperando...</p>';
+    });
     confidenceBar.classList.remove("visible");
     confidenceFill.style.width = "0%";
-    qaBadge.textContent = "❓";
+    lastAdvice = null;
   }
 
   function sendTranscript(text) {
@@ -299,29 +338,7 @@
 
   function sendSlideChange() {
     if (ws && ws.readyState === WebSocket.OPEN && pres.sessionId) {
-      ws.send(JSON.stringify({
-        action: "set_slide",
-        slide: pres.currentSlide + 1,
-      }));
+      ws.send(JSON.stringify({ action: "set_slide", slide: pres.currentSlide + 1 }));
     }
   }
-
-  // Toggle advice panel (collapse/expand)
-  let adviceCollapsed = false;
-  document.getElementById("toggle-advice").addEventListener("click", () => {
-    adviceCollapsed = !adviceCollapsed;
-    document.querySelector(".advice-tabs").classList.toggle("hidden", adviceCollapsed);
-    document.querySelector(".advice-tab-content").classList.toggle("hidden", adviceCollapsed);
-    document.getElementById("toggle-advice").textContent = adviceCollapsed ? "+" : "−";
-  });
-
-  // Back button
-  document.getElementById("btn-back").addEventListener("click", () => {
-    if (speech.listening) speech.stop();
-    if (ws) { ws.close(); ws = null; }
-    presScreen.classList.remove("active");
-    presScreen.classList.add("hidden");
-    uploadScreen.classList.remove("hidden");
-    uploadScreen.classList.add("active");
-  });
 })();

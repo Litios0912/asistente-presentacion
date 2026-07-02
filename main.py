@@ -155,15 +155,15 @@ Responde solo JSON:
 
         search_terms = set()
         for s in session.analysis.get("slides", []):
-            for t in s.get("search_terms", []):
+            for t in s.get("search_terms", [])[:2]:
                 search_terms.add(t)
 
         for term in list(search_terms)[:3]:
             try:
-                results = await web_search(term)
+                results = await web_search(term, max_results=3)
                 for s in session.analysis.get("slides", []):
                     if term in s.get("search_terms", []):
-                        s.setdefault("web_results", []).extend(results[:3])
+                        s.setdefault("web_results", []).extend(results[:2])
             except Exception:
                 pass
 
@@ -233,52 +233,25 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             break
 
                 if is_question:
-                    system_prompt = """El presentador recibió una pregunta. Tu función es dar información útil para responderla bien.
-
-Solo responde JSON:
-{"advice":"información para responder la pregunta (máx 3 oraciones)","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["dato relevante 1","dato relevante 2"],"suggested_questions":[],"suggested_slide":null,"is_question":true,"qa_answer":"respuesta basada en el contenido"}
-
-- advice: dato útil para responder
-- qa_answer: mejor respuesta posible según el contenido
-- extra_info: datos adicionales relevantes a la pregunta"""
+                    system_prompt = 'Responde solo JSON: {"advice":"info útil (máx 2 oraciones)","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["dato1","dato2"],"suggested_questions":[],"suggested_slide":null,"is_question":true,"qa_answer":"respuesta según el contenido"}'
 
                     user_msg = json.dumps({
-                        "current_slide": current + 1,
-                        "slide_content": slide_content[:1500],
+                        "slide_content": slide_content[:1000],
                         "pregunta": transcript,
-                        "presentation_title": session.title,
                         "qa_preparados": qa_list,
                         "resultados_web": web_results,
                     })
                 else:
-                    system_prompt = """Eres un asistente que ENRIQUECE presentaciones. Tu función es AÑADIR información relevante a lo que el presentador dice.
-
-NO evalúes si lo que dice coincide con el slide. En lugar de eso, PROPORCIONA:
-- Contexto adicional, datos interesantes o conexiones con otros temas
-- Información extra que la audiencia encontraría valiosa
-- Posibles preguntas que podrían surgir
-
-Solo responde JSON:
-{"advice":"información enriquecida sobre el tema que está tratando (máx 3 oraciones)","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["información adicional relevante 1","información 2","información 3"],"suggested_questions":["pregunta que podría hacer la audiencia 1?","pregunta 2?"],"key_points_covered":[],"key_points_missed":[],"suggested_slide":null,"is_question":false,"qa_answer":null}
-
-- advice: INFORMACIÓN ENRIQUECIDA sobre el tema que está presentando. Basada en el contenido del slide, lo que dijo, los resultados de búsqueda web y los Q&A preparados.
-- extra_info: lista de 2-4 datos adicionales, contextos o conexiones interesantes
-- suggested_questions: 1-2 preguntas relevantes que la audiencia podría hacer
-- slide_match: siempre true
-- off_topic: siempre false
-- confidence: siempre 0.9"""
+                    system_prompt = 'Responde solo JSON: {"advice":"información relevante sobre este tema (máx 2 oraciones)","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["dato adicional 1","dato 2","dato 3"],"suggested_questions":["pregunta 1?","pregunta 2?"],"key_points_covered":[],"key_points_missed":[],"suggested_slide":null,"is_question":false,"qa_answer":null}'
 
                     all_summaries = [
-                        f"Slide {s['number']}: {s['content'][:200]}"
+                        f"Slide {s['number']}: {s['content'][:150]}"
                         for s in session.slides
                     ]
 
                     user_msg = json.dumps({
-                        "current_slide": current + 1,
-                        "total_slides": len(session.slides),
-                        "slide_content": slide_content[:1500],
+                        "slide_content": slide_content[:1000],
                         "lo_que_dijo": recent,
-                        "presentation_title": session.title,
                         "all_slides_summary": all_summaries,
                         "resultados_busqueda_web": web_results,
                         "puntos_clave": slide_analysis["key_points"] if slide_analysis else [],
@@ -292,8 +265,8 @@ Solo responde JSON:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_msg},
                         ],
-                        temperature=0.4,
-                        max_tokens=500,
+                        temperature=0.2,
+                        max_tokens=200,
                     )
 
                     raw = completion.choices[0].message.content.strip()

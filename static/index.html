@@ -10,132 +10,123 @@
 <link rel="stylesheet" href="/css/style.css">
 </head>
 <body>
-  <div id="app">
-    <!-- Upload Screen -->
-    <div id="upload-screen" class="screen active">
-      <div class="upload-container">
-        <div class="logo">🎤</div>
-        <h1>Asistente de Presentación</h1>
-        <p class="subtitle">Coach con IA en tiempo real para tus presentaciones</p>
-        <div class="upload-zone" id="upload-zone">
-          <div class="upload-icon">📁</div>
-          <p>Sube tu presentación</p>
-          <span class="upload-hint">PDF o PPTX</span>
-          <input type="file" id="file-input" accept=".pdf,.pptx" hidden>
-        </div>
-        <div id="upload-status" class="hidden"></div>
-        <div id="analyze-status" class="hidden">🧠 Analizando presentación...</div>
-        <div class="setup-groq" id="setup-groq">
-          <p class="groq-hint">¿Sin API key? <button class="link-btn" id="show-groq-form">Configurar Groq</button></p>
-        </div>
+<div id="app">
+  <!-- Upload Screen -->
+  <div id="upload-screen" class="screen active">
+    <div class="upload-container">
+      <div class="logo">🎤</div>
+      <h1>Asistente de Presentación</h1>
+      <p class="subtitle">Información enriquecida con IA para tus presentaciones</p>
+      <div class="upload-zone" id="upload-zone">
+        <div class="upload-icon">📁</div>
+        <p>Sube tu presentación</p>
+        <span class="upload-hint">PDF o PPTX</span>
+        <input type="file" id="file-input" accept=".pdf,.pptx" hidden>
       </div>
-    </div>
-
-    <!-- Groq Setup Modal -->
-    <div id="groq-modal" class="modal hidden">
-      <div class="modal-content">
-        <h3>Configurar Groq API Key</h3>
-        <p>Regístrate gratis en <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> y pega tu API key:</p>
-        <input type="text" id="groq-key-input" placeholder="gsk_..." class="input" autocomplete="off">
-        <div class="modal-actions">
-          <button class="btn btn-secondary" id="cancel-groq">Cancelar</button>
-          <button class="btn btn-primary" id="save-groq">Guardar</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Presentation Screen -->
-    <div id="presentation-screen" class="screen hidden">
-      <header class="header">
-        <div class="header-left">
-          <button class="btn-icon" id="btn-back" title="Volver">←</button>
-          <span class="header-title" id="pres-title">Presentación</span>
-        </div>
-        <div class="header-right">
-          <span class="status-dot" id="status-dot"></span>
-          <span class="status-text" id="status-text">Esperando</span>
-        </div>
-      </header>
-
-      <div class="main-layout">
-        <!-- Controls top -->
-        <div class="slide-info">
-          <div class="slide-counter">
-            <button class="btn-icon" id="prev-slide" title="Anterior">◀</button>
-            <span id="slide-indicator">Diapositiva 1 / 1</span>
-            <button class="btn-icon" id="next-slide" title="Siguiente">▶</button>
-          </div>
-          <div class="slide-selector" id="slide-selector"></div>
-        </div>
-
-        <!-- Microphone + Transcript bar -->
-        <div class="mic-section">
-          <button class="btn btn-primary btn-mic" id="btn-mic">
-            <span class="mic-icon">🎤</span>
-            <span id="btn-mic-text">Iniciar micrófono</span>
-          </button>
-          <div class="confidence-bar" id="confidence-bar">
-            <div class="confidence-fill" id="confidence-fill"></div>
-          </div>
-          <div class="transcript-row">
-            <span class="transcript-label">📝</span>
-            <span class="transcript-text" id="transcript-text">—</span>
-          </div>
-        </div>
-
-        <!-- Advice Panel (BIG) -->
-        <div class="advice-panel card" id="advice-panel">
-          <div class="advice-header">
-            <h3>💡 Consejos en vivo</h3>
-            <div class="advice-header-right">
-              <span class="badge" id="qa-badge">❓</span>
-              <button class="btn-icon" id="toggle-advice" title="Minimizar">−</button>
-            </div>
-          </div>
-          <div class="advice-body" id="advice-body">
-            <div class="advice-welcome">
-              <p>Activa el micrófono y comienza a hablar.</p>
-            </div>
-          </div>
-          <!-- Tab bar -->
-          <div class="advice-tabs" id="advice-tabs">
-            <button class="tab active" data-tab="coaching">🎯 Coaching</button>
-            <button class="tab" data-tab="keypoints">📋 Puntos clave</button>
-            <button class="tab" data-tab="qa">❓ Q&A</button>
-          </div>
-          <div class="advice-tab-content">
-            <div class="tab-panel active" id="panel-coaching"></div>
-            <div class="tab-panel" id="panel-keypoints">
-              <p class="placeholder-sm">Esperando análisis...</p>
-            </div>
-            <div class="tab-panel" id="panel-qa">
-              <p class="placeholder-sm">Esperando análisis...</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Slide content (collapsible) -->
-        <details class="slide-details card" id="slide-details">
-          <summary class="slide-summary">
-            <span id="slide-number">Diapositiva 1</span>
-            <span class="chevron">▼</span>
-          </summary>
-          <div class="slide-body" id="slide-body">
-            <p class="placeholder">Contenido de la diapositiva</p>
-          </div>
-        </details>
+      <div id="upload-status" class="hidden"></div>
+      <div id="analyze-status" class="hidden">🧠 Analizando presentación y buscando en internet...</div>
+      <div class="setup-groq" id="setup-groq">
+        <p class="groq-hint">¿Sin API key? <button class="link-btn" id="show-groq-form">Configurar Groq</button></p>
       </div>
     </div>
   </div>
 
-  <script src="/js/upload.js"></script>
-  <script src="/js/speech.js"></script>
-  <script src="/js/presentation.js"></script>
-  <script src="/js/app.js"></script>
-  <script>
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js");
-    }
-  </script>
+  <!-- Groq Setup Modal -->
+  <div id="groq-modal" class="modal hidden">
+    <div class="modal-content">
+      <h3>Configurar Groq API Key</h3>
+      <p>Regístrate gratis en <a href="https://console.groq.com" target="_blank" rel="noopener">console.groq.com</a> y pega tu API key:</p>
+      <input type="text" id="groq-key-input" placeholder="gsk_..." class="input" autocomplete="off">
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="cancel-groq">Cancelar</button>
+        <button class="btn btn-primary" id="save-groq">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Presentation Screen -->
+  <div id="presentation-screen" class="screen hidden">
+    <header class="header">
+      <div class="header-left">
+        <button class="btn-icon" id="btn-back" title="Volver">←</button>
+        <span class="header-title" id="pres-title">Presentación</span>
+      </div>
+      <div class="header-right">
+        <span class="status-dot" id="status-dot"></span>
+        <span class="status-text" id="status-text">Esperando</span>
+      </div>
+    </header>
+
+    <!-- Main tabs: Slide | Advice -->
+    <div class="main-tabs">
+      <button class="main-tab active" data-panel="slide">📖 Diapositiva</button>
+      <button class="main-tab" data-panel="advice">💡 Consejos</button>
+    </div>
+
+    <div class="main-content">
+      <!-- ===== SLIDE PANEL ===== -->
+      <div class="main-panel active" id="panel-slide">
+        <div class="slide-info">
+          <div class="slide-counter">
+            <button class="btn-icon" id="prev-slide">◀</button>
+            <span id="slide-indicator">1 / 1</span>
+            <button class="btn-icon" id="next-slide">▶</button>
+          </div>
+          <div class="slide-selector" id="slide-selector"></div>
+        </div>
+        <div class="slide-content-panel">
+          <div class="slide-body-full" id="slide-body">
+            <p class="placeholder">Carga una presentación</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== ADVICE PANEL ===== -->
+      <div class="main-panel" id="panel-advice">
+        <div class="advice-scroll" id="advice-body">
+          <div class="advice-welcome">
+            <p>Activa el micrófono y comienza a hablar para recibir información enriquecida en tiempo real.</p>
+          </div>
+        </div>
+        <!-- Tabs dentro de consejos -->
+        <div class="advice-subtabs">
+          <button class="subtab active" data-sub="info">📌 Info</button>
+          <button class="subtab" data-sub="extra">➕ Extra</button>
+          <button class="subtab" data-sub="qa">❓ Q&A</button>
+        </div>
+        <div class="advice-subcontent">
+          <div class="subpanel active" id="sub-info"></div>
+          <div class="subpanel" id="sub-extra"></div>
+          <div class="subpanel" id="sub-qa"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Mic section (always visible) -->
+    <div class="mic-section">
+      <button class="btn btn-primary btn-mic" id="btn-mic">
+        <span class="mic-icon">🎤</span>
+        <span id="btn-mic-text">Iniciar micrófono</span>
+      </button>
+      <div class="confidence-bar" id="confidence-bar">
+        <div class="confidence-fill" id="confidence-fill"></div>
+      </div>
+      <div class="transcript-row">
+        <span class="transcript-label">📝</span>
+        <span class="transcript-text" id="transcript-text">—</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/upload.js"></script>
+<script src="/js/speech.js"></script>
+<script src="/js/presentation.js"></script>
+<script src="/js/app.js"></script>
+<script>
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js");
+  }
+</script>
 </body>
 </html>
