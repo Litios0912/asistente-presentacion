@@ -24,6 +24,7 @@
           <input type="file" id="file-input" accept=".pdf,.pptx" hidden>
         </div>
         <div id="upload-status" class="hidden"></div>
+        <div id="analyze-status" class="hidden">🧠 Analizando presentación...</div>
         <div class="setup-groq" id="setup-groq">
           <p class="groq-hint">¿Sin API key? <button class="link-btn" id="show-groq-form">Configurar Groq</button></p>
         </div>
@@ -57,7 +58,7 @@
       </header>
 
       <div class="main-layout">
-        <!-- Slide Info -->
+        <!-- Controls top -->
         <div class="slide-info">
           <div class="slide-counter">
             <button class="btn-icon" id="prev-slide" title="Anterior">◀</button>
@@ -67,36 +68,8 @@
           <div class="slide-selector" id="slide-selector"></div>
         </div>
 
-        <!-- Content Area -->
-        <div class="content-area">
-          <div class="slide-content card" id="slide-content">
-            <div class="slide-header">
-              <h3 id="slide-number">Diapositiva 1</h3>
-            </div>
-            <div class="slide-body" id="slide-body">
-              <p class="placeholder">Carga una presentación para comenzar</p>
-            </div>
-          </div>
-
-          <div class="advice-panel card" id="advice-panel">
-            <div class="advice-header">
-              <h3>💡 Consejos en vivo</h3>
-              <button class="btn-icon" id="toggle-advice" title="Minimizar">−</button>
-            </div>
-            <div class="advice-body" id="advice-body">
-              <div class="advice-welcome">
-                <p>Activa el micrófono y comienza a hablar para recibir consejos en tiempo real.</p>
-              </div>
-            </div>
-            <div class="advice-transcript">
-              <div class="transcript-label">📝 Transcripción:</div>
-              <div class="transcript-text" id="transcript-text">—</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Controls -->
-        <div class="controls">
+        <!-- Microphone + Transcript bar -->
+        <div class="mic-section">
           <button class="btn btn-primary btn-mic" id="btn-mic">
             <span class="mic-icon">🎤</span>
             <span id="btn-mic-text">Iniciar micrófono</span>
@@ -104,7 +77,53 @@
           <div class="confidence-bar" id="confidence-bar">
             <div class="confidence-fill" id="confidence-fill"></div>
           </div>
+          <div class="transcript-row">
+            <span class="transcript-label">📝</span>
+            <span class="transcript-text" id="transcript-text">—</span>
+          </div>
         </div>
+
+        <!-- Advice Panel (BIG) -->
+        <div class="advice-panel card" id="advice-panel">
+          <div class="advice-header">
+            <h3>💡 Consejos en vivo</h3>
+            <div class="advice-header-right">
+              <span class="badge" id="qa-badge">❓</span>
+              <button class="btn-icon" id="toggle-advice" title="Minimizar">−</button>
+            </div>
+          </div>
+          <div class="advice-body" id="advice-body">
+            <div class="advice-welcome">
+              <p>Activa el micrófono y comienza a hablar.</p>
+            </div>
+          </div>
+          <!-- Tab bar -->
+          <div class="advice-tabs" id="advice-tabs">
+            <button class="tab active" data-tab="coaching">🎯 Coaching</button>
+            <button class="tab" data-tab="keypoints">📋 Puntos clave</button>
+            <button class="tab" data-tab="qa">❓ Q&A</button>
+          </div>
+          <div class="advice-tab-content">
+            <div class="tab-panel active" id="panel-coaching"></div>
+            <div class="tab-panel" id="panel-keypoints">
+              <p class="placeholder-sm">Esperando análisis...</p>
+            </div>
+            <div class="tab-panel" id="panel-qa">
+              <p class="placeholder-sm">Esperando análisis...</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Slide content (collapsible) -->
+        <details class="slide-details card" id="slide-details">
+          <summary class="slide-summary">
+            <span id="slide-number">Diapositiva 1</span>
+            <span class="chevron">▼</span>
+          </summary>
+          <div class="slide-body" id="slide-body">
+            <p class="placeholder">Contenido de la diapositiva</p>
+          </div>
+        </details>
       </div>
     </div>
   </div>

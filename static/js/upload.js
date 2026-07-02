@@ -3,10 +3,12 @@ class UploadManager {
     this.zone = document.getElementById("upload-zone");
     this.input = document.getElementById("file-input");
     this.status = document.getElementById("upload-status");
+    this.analyzeStatus = document.getElementById("analyze-status");
     this.groqModal = document.getElementById("groq-modal");
     this.groqInput = document.getElementById("groq-key-input");
     this.setupGroq = document.getElementById("setup-groq");
     this._onSessionReady = null;
+    this._lastSessionId = null;
   }
 
   onSessionReady(cb) { this._onSessionReady = cb; }
@@ -68,10 +70,39 @@ class UploadManager {
         return;
       }
       this._showStatus(`"${data.title}" cargada (${data.total_slides} diapositivas)`, "success");
+      this._lastSessionId = data.session_id;
       if (this._onSessionReady) this._onSessionReady(data);
+      this._autoAnalyze(data.session_id);
     } catch (err) {
       this._showStatus("Error de conexión con el servidor", "error");
     }
+  }
+
+  async _autoAnalyze(sessionId) {
+    const groqKey = localStorage.getItem("groq_key");
+    if (!groqKey) return;
+
+    this.analyzeStatus.classList.remove("hidden");
+
+    try {
+      const res = await fetch(`/analyze/${sessionId}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ groq_key: groqKey }),
+      });
+      const data = await res.json();
+      this.analyzeStatus.classList.add("hidden");
+      if (data.status === "ok" && data.analysis) {
+        this._onAnalysisReady(data.analysis);
+      }
+    } catch (err) {
+      this.analyzeStatus.classList.add("hidden");
+    }
+  }
+
+  _onAnalysisReady(analysis) {
+    const event = new CustomEvent("analysis-ready", { detail: analysis });
+    document.dispatchEvent(event);
   }
 
   _showStatus(msg, type) {
@@ -79,9 +110,7 @@ class UploadManager {
     this.status.className = type;
     this.status.classList.remove("hidden");
     if (type === "success") {
-      setTimeout(() => {
-        this.status.classList.add("hidden");
-      }, 3000);
+      setTimeout(() => this.status.classList.add("hidden"), 3000);
     }
   }
 }

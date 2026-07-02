@@ -20,8 +20,7 @@
   const transcriptText = document.getElementById("transcript-text");
   const confidenceBar = document.getElementById("confidence-bar");
   const confidenceFill = document.getElementById("confidence-fill");
-  const toggleAdvice = document.getElementById("toggle-advice");
-  const advicePanel = document.getElementById("advice-panel");
+  const qaBadge = document.getElementById("qa-badge");
 
   // Init
   upload.init();
@@ -37,7 +36,19 @@
     presScreen.classList.remove("hidden");
     presScreen.classList.add("active");
 
+    resetAdvice();
     connectWebSocket(data.session_id);
+  });
+
+  // Analysis ready (from upload auto-analyze)
+  document.addEventListener("analysis-ready", (e) => {
+    pres.setAnalysis(e.detail);
+    const totalQ = e.detail.slides.reduce((sum, s) => sum + (s.questions || []).length, 0);
+    if (totalQ > 0) {
+      qaBadge.textContent = `❓${totalQ}`;
+    }
+    // Show key points tab content
+    renderKeyPointsOnSlide();
   });
 
   // Speech events
@@ -75,7 +86,7 @@
         statusText.textContent = "No soportado";
         btnMic.disabled = true;
         btnMicText.textContent = "Micrófono no disponible";
-        adviceBody.innerHTML = '<div class="advice-item off-topic">⚠️ Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge en un celular/PC.</div>';
+        addAdviceItem("⚠️ Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge.", "off-topic");
         break;
       case "error":
         statusDot.classList.add("error");
@@ -99,12 +110,28 @@
   document.getElementById("prev-slide").addEventListener("click", () => {
     pres.prevSlide();
     sendSlideChange();
+    renderKeyPointsOnSlide();
   });
   document.getElementById("next-slide").addEventListener("click", () => {
     pres.nextSlide();
     sendSlideChange();
+    renderKeyPointsOnSlide();
   });
-  pres.onSlideChange(() => sendSlideChange());
+  pres.onSlideChange(() => {
+    sendSlideChange();
+    renderKeyPointsOnSlide();
+  });
+
+  // Tab switching
+  document.querySelectorAll(".tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      const panel = document.getElementById(`panel-${tab.dataset.tab}`);
+      if (panel) panel.classList.add("active");
+    });
+  });
 
   // WebSocket
   function connectWebSocket(sessionId) {
@@ -121,7 +148,7 @@
         ws.send(JSON.stringify({ action: "set_key", key: groqKey }));
       }
       if (speech.supported && !speech.listening) {
-        adviceBody.innerHTML = '<div class="advice-item good">✅ Conexión establecida. Presiona el micrófono para comenzar.</div>';
+        addAdviceItem("✅ Conexión establecida. Presiona el micrófono para comenzar.", "good");
       }
     };
 
@@ -155,37 +182,112 @@
     if (data.type === "advice") {
       pres.updateCurrentSlide(data.current_slide);
 
-      let adviceClass = "advice-item";
-      if (data.off_topic) adviceClass += " off-topic";
-      else if (data.slide_match) adviceClass += " good";
-
+      // Update confidence bar
       const confidence = data.confidence || 0;
       confidenceFill.style.width = `${Math.round(confidence * 100)}%`;
       confidenceFill.className = "confidence-fill" +
         (confidence > 0.7 ? " high" : confidence > 0.4 ? " medium" : " low");
       confidenceBar.classList.add("visible");
 
-      const item = document.createElement("div");
-      item.className = adviceClass;
+      // Determine advice style
+      let style = "good";
+      if (data.off_topic) style = "off-topic";
+      else if (data.is_question) style = "question";
 
+      // Icon
       let icon = "💡";
-      if (data.off_topic) icon = "⚠️";
+      if (data.is_question) icon = "❓";
+      else if (data.off_topic) icon = "⚠️";
       else if (data.slide_match && confidence > 0.7) icon = "✅";
-      item.innerHTML = `${icon} ${data.advice}`;
 
-      const welcome = adviceBody.querySelector(".advice-welcome");
-      if (welcome) welcome.remove();
+      // Build advice text
+      let adviceText = `${icon} ${data.advice}`;
 
-      adviceBody.insertBefore(item, adviceBody.firstChild);
-
-      while (adviceBody.children.length > 5) {
-        adviceBody.removeChild(adviceBody.lastChild);
+      // Add key points summary if available
+      if (data.key_points_covered && data.key_points_covered.length > 0) {
+        adviceText += '<div class="key-points"><div class="key-points-title">✅ Cubierto:</div>';
+        for (const kp of data.key_points_covered) {
+          adviceText += `<div class="key-point done">${kp}</div>`;
+        }
+        adviceText += "</div>";
       }
+      if (data.key_points_missed && data.key_points_missed.length > 0) {
+        adviceText += '<div class="key-points"><div class="key-points-title">⬜ Falta:</div>';
+        for (const kp of data.key_points_missed) {
+          adviceText += `<div class="key-point missed">${kp}</div>`;
+        }
+        adviceText += "</div>";
+      }
+
+      // Add Q&A answer if applicable
+      if (data.is_question && data.qa_answer) {
+        adviceText += `<div class="advice-item qa-answer">${data.qa_answer}</div>`;
+        qaBadge.textContent = "💬";
+      }
+
+      addAdviceItem(adviceText, style);
+
+      // Update coaching tab content
+      updateCoachingTab(data);
+
     } else if (data.type === "slide_changed") {
       pres.updateCurrentSlide(data.current_slide);
     } else if (data.type === "error") {
-      adviceBody.innerHTML = `<div class="advice-item off-topic">⚠️ ${data.message}</div>`;
+      addAdviceItem(`⚠️ ${data.message}`, "off-topic");
     }
+  }
+
+  function addAdviceItem(html, style) {
+    const item = document.createElement("div");
+    item.className = `advice-item ${style || ""}`;
+    item.innerHTML = html;
+
+    const welcome = adviceBody.querySelector(".advice-welcome");
+    if (welcome) welcome.remove();
+
+    adviceBody.insertBefore(item, adviceBody.firstChild);
+
+    while (adviceBody.children.length > 8) {
+      adviceBody.removeChild(adviceBody.lastChild);
+    }
+  }
+
+  function updateCoachingTab(data) {
+    const panel = document.getElementById("panel-coaching");
+    let html = '<ul class="coaching-list">';
+
+    if (data.key_points_covered && data.key_points_covered.length > 0) {
+      for (const kp of data.key_points_covered) {
+        html += `<li class="done">✅ ${kp}</li>`;
+      }
+    }
+    if (data.key_points_missed && data.key_points_missed.length > 0) {
+      for (const kp of data.key_points_missed) {
+        html += `<li class="missed">⬜ ${kp}</li>`;
+      }
+    }
+    if (data.is_question && data.qa_answer) {
+      html += `<li class="question-mark">❓ Pregunta detectada — respuesta sugerida disponible</li>`;
+    }
+    if (!data.key_points_covered && !data.key_points_missed) {
+      html += '<li class="placeholder-sm">Esperando datos del coach...</li>';
+    }
+
+    html += "</ul>";
+    panel.innerHTML = html;
+  }
+
+  function renderKeyPointsOnSlide() {
+    pres._renderKeyPointsTab();
+    pres._renderQATab();
+  }
+
+  function resetAdvice() {
+    adviceBody.innerHTML = '<div class="advice-welcome"><p>Activa el micrófono y comienza a hablar.</p></div>';
+    document.getElementById("panel-coaching").innerHTML = '<p class="placeholder-sm">Esperando datos del coach...</p>';
+    confidenceBar.classList.remove("visible");
+    confidenceFill.style.width = "0%";
+    qaBadge.textContent = "❓";
   }
 
   function sendTranscript(text) {
@@ -203,12 +305,13 @@
     }
   }
 
-  // Toggle advice panel
+  // Toggle advice panel (collapse/expand)
   let adviceCollapsed = false;
-  toggleAdvice.addEventListener("click", () => {
+  document.getElementById("toggle-advice").addEventListener("click", () => {
     adviceCollapsed = !adviceCollapsed;
-    advicePanel.classList.toggle("collapsed", adviceCollapsed);
-    toggleAdvice.textContent = adviceCollapsed ? "+" : "−";
+    document.querySelector(".advice-tabs").classList.toggle("hidden", adviceCollapsed);
+    document.querySelector(".advice-tab-content").classList.toggle("hidden", adviceCollapsed);
+    document.getElementById("toggle-advice").textContent = adviceCollapsed ? "+" : "−";
   });
 
   // Back button

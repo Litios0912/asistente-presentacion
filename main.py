@@ -26,6 +26,7 @@ class PresentationSession:
         self.title = ""
         self.transcript_history = []
         self.groq_key = None
+        self.analysis = None
 
     def extract_slides(self, filepath: str):
         ext = Path(filepath).suffix.lower()
@@ -86,18 +87,60 @@ async def upload_file(file: UploadFile = File(...)):
     }
 
 
-@app.get("/session/{session_id}")
-async def get_session(session_id: str):
+@app.post("/analyze/{session_id}")
+async def analyze_presentation(session_id: str, data: dict):
     session = sessions.get(session_id)
     if not session:
         return JSONResponse({"error": "Sesión no encontrada"}, status_code=404)
-    return {
-        "session_id": session_id,
-        "title": session.title,
-        "total_slides": len(session.slides),
-        "current_slide": session.current_slide,
-        "slides": session.slides,
+
+    groq_key = data.get("groq_key") or session.groq_key or GROQ_API_KEY
+    if not groq_key:
+        return JSONResponse({"error": "GROQ_API_KEY no configurada"}, status_code=400)
+
+    from groq import AsyncGroq
+    client = AsyncGroq(api_key=groq_key)
+    session.groq_key = groq_key
+
+    slides_text = "\n\n".join(
+        f"--- Slide {s['number']} ---\n{s['content'][:1000]}"
+        for s in session.slides
+    )
+
+    try:
+        completion = await client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": """Eres un analista de presentaciones. Dado el contenido completo de una presentación, extrae:
+1. Para cada slide: 2-4 puntos clave que el presentador DEBE mencionar
+2. 1-3 preguntas potenciales que la audiencia podría hacer sobre cada slide
+3. Una respuesta sugerida concisa para cada pregunta (basada en el contenido)
+
+Responde ÚNICAMENTE con JSON, sin markdown:
+
+{
+  "slides": [
+    {
+      "number": 1,
+      "key_points": ["texto del punto clave 1", "punto clave 2"],
+      "questions": [
+        {"q": "pregunta que haría la audiencia", "a": "respuesta sugerida basada en el contenido"}
+      ]
     }
+  ]
+}"""},
+                {"role": "user", "content": f"Título: {session.title}\n\n{slides_text}"},
+            ],
+            temperature=0.2,
+            max_tokens=2000,
+        )
+
+        raw = completion.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        session.analysis = json.loads(raw)
+        return {"status": "ok", "analysis": session.analysis}
+
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.websocket("/ws/{session_id}")
@@ -130,6 +173,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         continue
                     from groq import AsyncGroq
                     client = AsyncGroq(api_key=api_key)
+
                 transcript = data.get("text", "").strip()
                 if not transcript:
                     continue
@@ -138,7 +182,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 session.transcript_history = session.transcript_history[-20:]
 
                 current = session.current_slide
-                slide_content = session.slides[current]["content"] if current < len(session.slides) else ""
+                slide = session.slides[current] if current < len(session.slides) else None
+                slide_content = slide["content"] if slide else ""
 
                 recent = " ".join(session.transcript_history[-5:])
                 all_summaries = [
@@ -146,26 +191,69 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     for s in session.slides
                 ]
 
-                system_prompt = """Eres un coach de presentaciones en tiempo real. Analizas lo que el presentador dice y el slide actual.
-Responde ÚNICAMENTE con JSON sin formato, sin markdown, sin etiquetas.
+                is_question = bool(transcript.strip().endswith("?"))
 
-Formato exacto:
-{"advice":"texto breve de consejo","slide_match":true/false,"suggested_slide":numero o null,"off_topic":true/false,"confidence":0.0-1.0}
+                slide_analysis = None
+                if session.analysis:
+                    for sa in session.analysis.get("slides", []):
+                        if sa["number"] == current + 1:
+                            slide_analysis = sa
+                            break
 
-- advice: consejo útil y corto (máx 2 oraciones). Si va bien, da ánimo. Si se desvía, sugiere retomar. Si omite puntos clave, menciónalos.
+                key_points_text = ""
+                qa_text = ""
+                if slide_analysis:
+                    kp = slide_analysis.get("key_points", [])
+                    if kp:
+                        key_points_text = "Puntos clave de este slide:\n" + "\n".join(f"- {p}" for p in kp)
+                    qs = slide_analysis.get("questions", [])
+                    if qs:
+                        qa_text = "Preguntas esperadas para este slide:\n" + "\n".join(f"Q: {q['q']}\nA: {q['a']}" for q in qs)
+
+                if is_question:
+                    system_prompt = f"""Eres un coach de presentaciones. El presentador acaba de recibir una PREGUNTA del público.
+Responde ÚNICAMENTE con JSON, sin markdown:
+
+{{"advice":"sugerencia de respuesta","slide_match":true/false,"suggested_slide":numero o null,"off_topic":false,"confidence":0.0-1.0,"key_points_covered":[],"key_points_missed":[],"is_question":true,"qa_answer":"respuesta recomendada para la pregunta del público"}}
+
+- advice: cómo abordar la pregunta (mantén la calma, conecta con tu contenido, etc.)
+- qa_answer: la mejor respuesta basada en el contenido de la presentación (máx 3 oraciones)
+- Si hay preguntas preparadas para este slide y alguna coincide, usa esa respuesta
+- confidence: qué tan seguro estás de la respuesta"""
+
+                    user_msg = json.dumps({
+                        "current_slide": current + 1,
+                        "total_slides": len(session.slides),
+                        "slide_content": slide_content[:1500],
+                        "pregunta_recibida": transcript,
+                        "presentation_title": session.title,
+                        "all_slides_summary": all_summaries,
+                        **({"puntos_clave_slide": kp} if slide_analysis else {}),
+                        **({"qa_preparados": qs} if slide_analysis else {}),
+                    })
+                else:
+                    system_prompt = f"""Eres un coach de presentaciones en tiempo real. Analizas lo que el presentador dice vs el slide actual y los puntos clave esperados.
+Responde ÚNICAMENTE con JSON, sin markdown:
+
+{{"advice":"consejo breve (máx 2 oraciones)","slide_match":true/false,"suggested_slide":numero o null,"off_topic":true/false,"confidence":0.0-1.0,"key_points_covered":["puntos que ya mencionó"],"key_points_missed":["puntos que faltan"],"is_question":false,"qa_answer":null}}
+
+- advice: consejo útil. Si va bien, da ánimo. Si se desvía, sugiere retomar. Si faltan puntos clave, menciónalos.
+- key_points_covered: lista de puntos clave (del análisis) que ya cubrió en lo que dijo
+- key_points_missed: lista de puntos clave que aún no ha mencionado
 - slide_match: true si lo que dijo corresponde al slide actual
-- suggested_slide: si lo que dijo coincide más con OTRO slide, pon su número (1-indexed). Si no, null.
-- off_topic: true si se está desviando del tema del slide actual
-- confidence: qué tan seguro estás de tu análisis (0.0 = nada, 1.0 = totalmente)"""
+- suggested_slide: si coincide más con OTRO slide, pon su número
+- off_topic: si se está saliendo del tema"""
 
-                user_msg = json.dumps({
-                    "current_slide": current + 1,
-                    "total_slides": len(session.slides),
-                    "slide_content": slide_content[:1500],
-                    "recent_transcript": recent,
-                    "presentation_title": session.title,
-                    "all_slides_summary": all_summaries,
-                })
+                    user_msg = json.dumps({
+                        "current_slide": current + 1,
+                        "total_slides": len(session.slides),
+                        "slide_content": slide_content[:1500],
+                        "recent_transcript": recent,
+                        "presentation_title": session.title,
+                        "all_slides_summary": all_summaries,
+                        **({"key_points_esperados": slide_analysis["key_points"]} if slide_analysis else {}),
+                        **({"qa_disponibles": qs} if slide_analysis else {}),
+                    })
 
                 try:
                     completion = await client.chat.completions.create(
@@ -175,15 +263,18 @@ Formato exacto:
                             {"role": "user", "content": user_msg},
                         ],
                         temperature=0.3,
-                        max_tokens=300,
+                        max_tokens=400,
                     )
 
                     raw = completion.choices[0].message.content.strip()
                     raw = raw.replace("```json", "").replace("```", "").strip()
                     result = json.loads(raw)
 
-                    if result.get("suggested_slide") and result["suggested_slide"] != current + 1:
-                        session.current_slide = result["suggested_slide"] - 1
+                    if result.get("suggested_slide") and isinstance(result["suggested_slide"], (int, float)):
+                        suggested = int(result["suggested_slide"])
+                        if suggested != current + 1 and 1 <= suggested <= len(session.slides):
+                            session.current_slide = suggested - 1
+                            result["current_slide"] = suggested
 
                     result["current_slide"] = session.current_slide + 1
                     await websocket.send_json({"type": "advice", **result})
