@@ -211,15 +211,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         qa_text = "Preguntas esperadas para este slide:\n" + "\n".join(f"Q: {q['q']}\nA: {q['a']}" for q in qs)
 
                 if is_question:
-                    system_prompt = f"""Eres un coach de presentaciones. El presentador acaba de recibir una PREGUNTA del público.
-Responde ÚNICAMENTE con JSON, sin markdown:
+                    system_prompt = f"""El presentador recibió una PREGUNTA del público. Da información útil únicamente.
+Responde solo JSON:
 
-{{"advice":"sugerencia de respuesta","slide_match":true/false,"suggested_slide":numero o null,"off_topic":false,"confidence":0.0-1.0,"key_points_covered":[],"key_points_missed":[],"is_question":true,"qa_answer":"respuesta recomendada para la pregunta del público"}}
+{{"advice":"dato útil sobre la pregunta","slide_match":true/false,"suggested_slide":numero o null,"off_topic":false,"confidence":0.0-1.0,"key_points_covered":[],"key_points_missed":[],"is_question":true,"qa_answer":"respuesta basada en el contenido de la presentación"}}
 
-- advice: cómo abordar la pregunta (mantén la calma, conecta con tu contenido, etc.)
-- qa_answer: la mejor respuesta basada en el contenido de la presentación (máx 3 oraciones)
-- Si hay preguntas preparadas para este slide y alguna coincide, usa esa respuesta
-- confidence: qué tan seguro estás de la respuesta"""
+- advice: dato relevante sobre cómo responder, sin ánimos
+- qa_answer: respuesta factual basada en la presentación (máx 3 oraciones)
+- Si hay Q&A preparados para este slide, prioriza esa información"""
 
                     user_msg = json.dumps({
                         "current_slide": current + 1,
@@ -232,17 +231,17 @@ Responde ÚNICAMENTE con JSON, sin markdown:
                         **({"qa_preparados": qs} if slide_analysis else {}),
                     })
                 else:
-                    system_prompt = f"""Eres un coach de presentaciones en tiempo real. Analizas lo que el presentador dice vs el slide actual y los puntos clave esperados.
-Responde ÚNICAMENTE con JSON, sin markdown:
+                    system_prompt = f"""Analizas lo dicho vs el slide actual. Solo información útil, sin ánimos ni felicitaciones.
+Responde solo JSON:
 
-{{"advice":"consejo breve (máx 2 oraciones)","slide_match":true/false,"suggested_slide":numero o null,"off_topic":true/false,"confidence":0.0-1.0,"key_points_covered":["puntos que ya mencionó"],"key_points_missed":["puntos que faltan"],"is_question":false,"qa_answer":null}}
+{{"advice":"dato informativo (máx 2 oraciones)","slide_match":true/false,"suggested_slide":numero o null,"off_topic":true/false,"confidence":0.0-1.0,"key_points_covered":["puntos que ya dijo"],"key_points_missed":["puntos que faltan"],"is_question":false,"qa_answer":null}}
 
-- advice: consejo útil. Si va bien, da ánimo. Si se desvía, sugiere retomar. Si faltan puntos clave, menciónalos.
-- key_points_covered: lista de puntos clave (del análisis) que ya cubrió en lo que dijo
-- key_points_missed: lista de puntos clave que aún no ha mencionado
-- slide_match: true si lo que dijo corresponde al slide actual
-- suggested_slide: si coincide más con OTRO slide, pon su número
-- off_topic: si se está saliendo del tema"""
+- advice: información sobre lo que está cubriendo, lo que falta o si se desvía. Sin frases de ánimo.
+- key_points_covered: puntos clave que ya mencionó
+- key_points_missed: puntos clave que aún no cubre
+- slide_match: true si corresponde al slide
+- suggested_slide: si su contenido coincide con otro slide, ese número
+- off_topic: true si no está cubriendo el slide actual"""
 
                     user_msg = json.dumps({
                         "current_slide": current + 1,
