@@ -69,7 +69,7 @@
     if (totalQ > 0) {
       document.querySelector('.subtab[data-sub="qa"]').textContent = `❓ Q&A (${totalQ})`;
     }
-    renderSubPanels();
+    renderQASubPanel();
   });
 
   // ===== SPEECH =====
@@ -130,16 +130,16 @@
   document.getElementById("prev-slide").addEventListener("click", () => {
     pres.prevSlide();
     sendSlideChange();
-    renderSubPanels();
+    renderQASubPanel();
   });
   document.getElementById("next-slide").addEventListener("click", () => {
     pres.nextSlide();
     sendSlideChange();
-    renderSubPanels();
+    renderQASubPanel();
   });
   pres.onSlideChange(() => {
     sendSlideChange();
-    renderSubPanels();
+    renderQASubPanel();
   });
 
   // ===== BACK BUTTON =====
@@ -293,15 +293,6 @@
     } else {
       // Show prepared Q&A
       renderQASubPanel();
-    }
-  }
-
-  function renderSubPanels() {
-    if (lastAdvice) updateSubPanels(lastAdvice);
-    renderQASubPanel();
-    const panel = document.getElementById("sub-extra");
-    if (!panel.innerHTML || panel.innerHTML.includes("placeholder")) {
-      pres._renderKeyPointsTab();
     }
   }
 

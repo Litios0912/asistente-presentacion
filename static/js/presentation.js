@@ -21,8 +21,6 @@ class PresentationManager {
 
   setAnalysis(analysis) {
     this.analysis = analysis;
-    this._renderKeyPointsTab();
-    this._renderQATab();
   }
 
   setSlide(index) {
@@ -30,8 +28,6 @@ class PresentationManager {
     this.currentSlide = index;
     this._showSlide(index);
     this._renderSlideDots();
-    this._renderKeyPointsTab();
-    this._renderQATab();
     if (this._onSlideChange) this._onSlideChange(index);
   }
 
@@ -40,7 +36,6 @@ class PresentationManager {
 
   _showSlide(index) {
     const slide = this.slides[index];
-    document.getElementById("slide-number").textContent = `Diapositiva ${index + 1}`;
     document.getElementById("slide-indicator").textContent = `Diapositiva ${index + 1} / ${this.totalSlides}`;
 
     const body = document.getElementById("slide-body");
@@ -71,49 +66,6 @@ class PresentationManager {
       this.currentSlide = idx;
       this._showSlide(idx);
       this._renderSlideDots();
-      this._renderKeyPointsTab();
     }
-  }
-
-  _renderKeyPointsTab() {
-    const panel = document.getElementById("panel-keypoints");
-    if (!this.analysis || !this.analysis.slides) {
-      panel.innerHTML = '<p class="placeholder-sm">Sube una presentación para ver los puntos clave.</p>';
-      return;
-    }
-
-    const slideAnalysis = this.analysis.slides.find(s => s.number === this.currentSlide + 1);
-    if (!slideAnalysis || !slideAnalysis.key_points || slideAnalysis.key_points.length === 0) {
-      panel.innerHTML = '<p class="placeholder-sm">No hay puntos clave para esta diapositiva.</p>';
-      return;
-    }
-
-    let html = '<div class="kp-section"><div class="kp-section-title">🎯 Puntos clave de esta diapositiva</div><ul class="kp-list">';
-    for (const kp of slideAnalysis.key_points) {
-      html += `<li>${kp}</li>`;
-    }
-    html += '</ul></div>';
-    panel.innerHTML = html;
-  }
-
-  _renderQATab() {
-    const panel = document.getElementById("panel-qa");
-    if (!this.analysis || !this.analysis.slides) {
-      panel.innerHTML = '<p class="placeholder-sm">Sube una presentación para ver las preguntas preparadas.</p>';
-      return;
-    }
-
-    const slideAnalysis = this.analysis.slides.find(s => s.number === this.currentSlide + 1);
-    if (!slideAnalysis || !slideAnalysis.questions || slideAnalysis.questions.length === 0) {
-      panel.innerHTML = '<p class="placeholder-sm">No hay preguntas preparadas para esta diapositiva.</p>';
-      return;
-    }
-
-    let html = '<div class="kp-section"><div class="kp-section-title">❓ Preguntas que podrían hacer</div>';
-    for (const qa of slideAnalysis.questions) {
-      html += `<div class="qa-item"><div class="qa-q">${qa.q}</div><div class="qa-a">${qa.a}</div></div>`;
-    }
-    html += '</div>';
-    panel.innerHTML = html;
   }
 }
