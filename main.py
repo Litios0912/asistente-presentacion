@@ -27,6 +27,7 @@ class PresentationSession:
         self.transcript_history = []
         self.groq_key = None
         self.analysis = None
+        self.search_cache = {}
 
     def extract_slides(self, filepath: str):
         ext = Path(filepath).suffix.lower()
@@ -58,6 +59,18 @@ class PresentationSession:
             text = "\n".join(parts)
             if text:
                 self.slides.append({"number": len(self.slides) + 1, "content": text})
+
+
+async def web_search(query: str, max_results: int = 5) -> list:
+    try:
+        from duckduckgo_search import DDGS
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                results.append(r.get("body", ""))
+        return results[:max_results]
+    except Exception:
+        return []
 
 
 @app.post("/upload")
@@ -110,20 +123,22 @@ async def analyze_presentation(session_id: str, data: dict):
         completion = await client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": """Eres un analista de presentaciones. Dado el contenido completo de una presentación, extrae:
-1. Para cada slide: 2-4 puntos clave que el presentador DEBE mencionar
-2. 1-3 preguntas potenciales que la audiencia podría hacer sobre cada slide
-3. Una respuesta sugerida concisa para cada pregunta (basada en el contenido)
+                {"role": "system", "content": """Dada una presentación, analiza cada slide y extrae:
 
-Responde ÚNICAMENTE con JSON, sin markdown:
+1. Temas principales del slide (para búsqueda web)
+2. Puntos clave que vale la pena mencionar
+3. Preguntas que la audiencia podría hacer
+4. Respuestas sugeridas para esas preguntas
 
+Responde solo JSON:
 {
   "slides": [
     {
       "number": 1,
-      "key_points": ["texto del punto clave 1", "punto clave 2"],
+      "key_points": ["punto clave 1", "punto clave 2"],
+      "search_terms": ["términos para buscar en internet"],
       "questions": [
-        {"q": "pregunta que haría la audiencia", "a": "respuesta sugerida basada en el contenido"}
+        {"q": "pregunta", "a": "respuesta"}
       ]
     }
   ]
@@ -137,6 +152,21 @@ Responde ÚNICAMENTE con JSON, sin markdown:
         raw = completion.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
         session.analysis = json.loads(raw)
+
+        search_terms = set()
+        for s in session.analysis.get("slides", []):
+            for t in s.get("search_terms", []):
+                search_terms.add(t)
+
+        for term in list(search_terms)[:3]:
+            try:
+                results = await web_search(term)
+                for s in session.analysis.get("slides", []):
+                    if term in s.get("search_terms", []):
+                        s.setdefault("web_results", []).extend(results[:3])
+            except Exception:
+                pass
+
         return {"status": "ok", "analysis": session.analysis}
 
     except Exception as e:
@@ -186,72 +216,73 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 slide_content = slide["content"] if slide else ""
 
                 recent = " ".join(session.transcript_history[-5:])
-                all_summaries = [
-                    f"Slide {s['number']}: {s['content'][:200]}"
-                    for s in session.slides
-                ]
 
                 is_question = bool(transcript.strip().endswith("?"))
 
                 slide_analysis = None
+                web_results = []
+                search_terms = []
+                qa_list = []
                 if session.analysis:
                     for sa in session.analysis.get("slides", []):
                         if sa["number"] == current + 1:
                             slide_analysis = sa
+                            search_terms = sa.get("search_terms", [])
+                            qa_list = sa.get("questions", [])
+                            web_results = sa.get("web_results", [])
                             break
 
-                key_points_text = ""
-                qa_text = ""
-                if slide_analysis:
-                    kp = slide_analysis.get("key_points", [])
-                    if kp:
-                        key_points_text = "Puntos clave de este slide:\n" + "\n".join(f"- {p}" for p in kp)
-                    qs = slide_analysis.get("questions", [])
-                    if qs:
-                        qa_text = "Preguntas esperadas para este slide:\n" + "\n".join(f"Q: {q['q']}\nA: {q['a']}" for q in qs)
-
                 if is_question:
-                    system_prompt = f"""El presentador recibió una PREGUNTA del público. Da información útil únicamente.
-Responde solo JSON:
+                    system_prompt = """El presentador recibió una pregunta. Tu función es dar información útil para responderla bien.
 
-{{"advice":"dato útil sobre la pregunta","slide_match":true/false,"suggested_slide":numero o null,"off_topic":false,"confidence":0.0-1.0,"key_points_covered":[],"key_points_missed":[],"is_question":true,"qa_answer":"respuesta basada en el contenido de la presentación"}}
+Solo responde JSON:
+{"advice":"información para responder la pregunta (máx 3 oraciones)","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["dato relevante 1","dato relevante 2"],"suggested_questions":[],"suggested_slide":null,"is_question":true,"qa_answer":"respuesta basada en el contenido"}
 
-- advice: dato relevante sobre cómo responder, sin ánimos
-- qa_answer: respuesta factual basada en la presentación (máx 3 oraciones)
-- Si hay Q&A preparados para este slide, prioriza esa información"""
+- advice: dato útil para responder
+- qa_answer: mejor respuesta posible según el contenido
+- extra_info: datos adicionales relevantes a la pregunta"""
 
                     user_msg = json.dumps({
                         "current_slide": current + 1,
-                        "total_slides": len(session.slides),
                         "slide_content": slide_content[:1500],
-                        "pregunta_recibida": transcript,
+                        "pregunta": transcript,
                         "presentation_title": session.title,
-                        "all_slides_summary": all_summaries,
-                        **({"puntos_clave_slide": kp} if slide_analysis else {}),
-                        **({"qa_preparados": qs} if slide_analysis else {}),
+                        "qa_preparados": qa_list,
+                        "resultados_web": web_results,
                     })
                 else:
-                    system_prompt = f"""Analizas lo dicho vs el slide actual. Solo información útil, sin ánimos ni felicitaciones.
-Responde solo JSON:
+                    system_prompt = """Eres un asistente que ENRIQUECE presentaciones. Tu función es AÑADIR información relevante a lo que el presentador dice.
 
-{{"advice":"dato informativo (máx 2 oraciones)","slide_match":true/false,"suggested_slide":numero o null,"off_topic":true/false,"confidence":0.0-1.0,"key_points_covered":["puntos que ya dijo"],"key_points_missed":["puntos que faltan"],"is_question":false,"qa_answer":null}}
+NO evalúes si lo que dice coincide con el slide. En lugar de eso, PROPORCIONA:
+- Contexto adicional, datos interesantes o conexiones con otros temas
+- Información extra que la audiencia encontraría valiosa
+- Posibles preguntas que podrían surgir
 
-- advice: información sobre lo que está cubriendo, lo que falta o si se desvía. Sin frases de ánimo.
-- key_points_covered: puntos clave que ya mencionó
-- key_points_missed: puntos clave que aún no cubre
-- slide_match: true si corresponde al slide
-- suggested_slide: si su contenido coincide con otro slide, ese número
-- off_topic: true si no está cubriendo el slide actual"""
+Solo responde JSON:
+{"advice":"información enriquecida sobre el tema que está tratando (máx 3 oraciones)","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["información adicional relevante 1","información 2","información 3"],"suggested_questions":["pregunta que podría hacer la audiencia 1?","pregunta 2?"],"key_points_covered":[],"key_points_missed":[],"suggested_slide":null,"is_question":false,"qa_answer":null}
+
+- advice: INFORMACIÓN ENRIQUECIDA sobre el tema que está presentando. Basada en el contenido del slide, lo que dijo, los resultados de búsqueda web y los Q&A preparados.
+- extra_info: lista de 2-4 datos adicionales, contextos o conexiones interesantes
+- suggested_questions: 1-2 preguntas relevantes que la audiencia podría hacer
+- slide_match: siempre true
+- off_topic: siempre false
+- confidence: siempre 0.9"""
+
+                    all_summaries = [
+                        f"Slide {s['number']}: {s['content'][:200]}"
+                        for s in session.slides
+                    ]
 
                     user_msg = json.dumps({
                         "current_slide": current + 1,
                         "total_slides": len(session.slides),
                         "slide_content": slide_content[:1500],
-                        "recent_transcript": recent,
+                        "lo_que_dijo": recent,
                         "presentation_title": session.title,
                         "all_slides_summary": all_summaries,
-                        **({"key_points_esperados": slide_analysis["key_points"]} if slide_analysis else {}),
-                        **({"qa_disponibles": qs} if slide_analysis else {}),
+                        "resultados_busqueda_web": web_results,
+                        "puntos_clave": slide_analysis["key_points"] if slide_analysis else [],
+                        "qa_preparados": qa_list,
                     })
 
                 try:
@@ -261,8 +292,8 @@ Responde solo JSON:
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_msg},
                         ],
-                        temperature=0.3,
-                        max_tokens=400,
+                        temperature=0.4,
+                        max_tokens=500,
                     )
 
                     raw = completion.choices[0].message.content.strip()
@@ -271,15 +302,26 @@ Responde solo JSON:
 
                     if result.get("suggested_slide") and isinstance(result["suggested_slide"], (int, float)):
                         suggested = int(result["suggested_slide"])
-                        if suggested != current + 1 and 1 <= suggested <= len(session.slides):
+                        if 1 <= suggested <= len(session.slides):
                             session.current_slide = suggested - 1
                             result["current_slide"] = suggested
 
                     result["current_slide"] = session.current_slide + 1
+                    result.setdefault("extra_info", [])
+                    result.setdefault("suggested_questions", [])
+                    result.setdefault("key_points_covered", [])
+                    result.setdefault("key_points_missed", [])
+
                     await websocket.send_json({"type": "advice", **result})
 
                 except Exception as e:
                     await websocket.send_json({"type": "error", "message": str(e)})
+
+            elif action == "search":
+                query = data.get("query", "").strip()
+                if query:
+                    results = await web_search(query)
+                    await websocket.send_json({"type": "search_results", "query": query, "results": results})
 
             elif action == "set_slide":
                 slide_num = data.get("slide", 1) - 1

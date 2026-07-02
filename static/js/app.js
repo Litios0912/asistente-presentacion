@@ -182,58 +182,53 @@
     if (data.type === "advice") {
       pres.updateCurrentSlide(data.current_slide);
 
-      // Update confidence bar
       const confidence = data.confidence || 0;
       confidenceFill.style.width = `${Math.round(confidence * 100)}%`;
       confidenceFill.className = "confidence-fill" +
         (confidence > 0.7 ? " high" : confidence > 0.4 ? " medium" : " low");
       confidenceBar.classList.add("visible");
 
-      // Determine advice style
       let style = "good";
-      if (data.off_topic) style = "off-topic";
-      else if (data.is_question) style = "question";
+      if (data.is_question) style = "question";
 
-      // Icon
-      let icon = "💡";
+      let icon = "📖";
       if (data.is_question) icon = "❓";
-      else if (data.off_topic) icon = "⚠️";
-      else if (data.slide_match && confidence > 0.7) icon = "✅";
 
-      // Build advice text
       let adviceText = `${icon} ${data.advice}`;
 
-      // Add key points summary if available
-      if (data.key_points_covered && data.key_points_covered.length > 0) {
-        adviceText += '<div class="key-points"><div class="key-points-title">✅ Cubierto:</div>';
-        for (const kp of data.key_points_covered) {
-          adviceText += `<div class="key-point done">${kp}</div>`;
-        }
-        adviceText += "</div>";
-      }
-      if (data.key_points_missed && data.key_points_missed.length > 0) {
-        adviceText += '<div class="key-points"><div class="key-points-title">⬜ Falta:</div>';
-        for (const kp of data.key_points_missed) {
-          adviceText += `<div class="key-point missed">${kp}</div>`;
+      // Extra info
+      if (data.extra_info && data.extra_info.length > 0) {
+        adviceText += '<div class="key-points"><div class="key-points-title">📌 Más información:</div>';
+        for (const info of data.extra_info) {
+          adviceText += `<div class="key-point done" style="color:var(--text2)">${info}</div>`;
         }
         adviceText += "</div>";
       }
 
-      // Add Q&A answer if applicable
+      // Suggested questions
+      if (data.suggested_questions && data.suggested_questions.length > 0) {
+        adviceText += '<div class="key-points"><div class="key-points-title">❓ Posibles preguntas:</div>';
+        for (const q of data.suggested_questions) {
+          adviceText += `<div class="key-point missed">${q}</div>`;
+        }
+        adviceText += "</div>";
+      }
+
+      // Q&A answer
       if (data.is_question && data.qa_answer) {
-        adviceText += `<div class="advice-item qa-answer">${data.qa_answer}</div>`;
+        adviceText += `<div class="advice-item qa-answer" style="margin-top:6px">${data.qa_answer}</div>`;
         qaBadge.textContent = "💬";
       }
 
       addAdviceItem(adviceText, style);
-
-      // Update coaching tab content
       updateCoachingTab(data);
 
     } else if (data.type === "slide_changed") {
       pres.updateCurrentSlide(data.current_slide);
     } else if (data.type === "error") {
       addAdviceItem(`⚠️ ${data.message}`, "off-topic");
+    } else if (data.type === "search_results") {
+      addAdviceItem(`🔍 Resultados de búsqueda para "${data.query}":<br>${data.results.slice(0,3).map(r => `• ${r}`).join("<br>")}`, "good");
     }
   }
 
@@ -254,26 +249,32 @@
 
   function updateCoachingTab(data) {
     const panel = document.getElementById("panel-coaching");
-    let html = '<ul class="coaching-list">';
+    let html = "";
 
-    if (data.key_points_covered && data.key_points_covered.length > 0) {
-      for (const kp of data.key_points_covered) {
-        html += `<li class="done">✅ ${kp}</li>`;
+    if (data.extra_info && data.extra_info.length > 0) {
+      html += '<div class="kp-section"><div class="kp-section-title">📌 Información adicional</div><ul class="kp-list">';
+      for (const info of data.extra_info) {
+        html += `<li>${info}</li>`;
       }
+      html += "</ul></div>";
     }
-    if (data.key_points_missed && data.key_points_missed.length > 0) {
-      for (const kp of data.key_points_missed) {
-        html += `<li class="missed">⬜ ${kp}</li>`;
+
+    if (data.suggested_questions && data.suggested_questions.length > 0) {
+      html += '<div class="kp-section"><div class="kp-section-title">❓ Posibles preguntas</div><ul class="kp-list">';
+      for (const q of data.suggested_questions) {
+        html += `<li style="color:var(--warning)">${q}</li>`;
       }
+      html += "</ul></div>";
     }
+
     if (data.is_question && data.qa_answer) {
-      html += `<li class="question-mark">❓ Pregunta detectada — respuesta sugerida disponible</li>`;
-    }
-    if (!data.key_points_covered && !data.key_points_missed) {
-      html += '<li class="placeholder-sm">Esperando datos del coach...</li>';
+      html += `<div class="kp-section"><div class="kp-section-title">💬 Respuesta sugerida</div><div style="font-size:13px;color:var(--text2);padding:0 8px">${data.qa_answer}</div></div>`;
     }
 
-    html += "</ul>";
+    if (!html) {
+      html = '<p class="placeholder-sm">Habla para recibir información enriquecida sobre el tema.</p>';
+    }
+
     panel.innerHTML = html;
   }
 
