@@ -123,14 +123,8 @@ async def analyze_presentation(session_id: str, data: dict):
         completion = await client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
-                {"role": "system", "content": """Dada una presentación, analiza cada slide y extrae:
+                {"role": "system", "content": """Eres un asistente que analiza presentaciones. Devuelve SOLO JSON válido, sin texto adicional.
 
-1. Temas principales del slide (para búsqueda web)
-2. Puntos clave que vale la pena mencionar
-3. Preguntas que la audiencia podría hacer
-4. Respuestas sugeridas para esas preguntas
-
-Responde solo JSON:
 {
   "slides": [
     {
@@ -145,12 +139,12 @@ Responde solo JSON:
 }"""},
                 {"role": "user", "content": f"Título: {session.title}\n\n{slides_text}"},
             ],
+            response_format={"type": "json_object"},
             temperature=0.2,
             max_tokens=2000,
         )
 
         raw = completion.choices[0].message.content.strip()
-        raw = raw.replace("```json", "").replace("```", "").strip()
         session.analysis = json.loads(raw)
 
         search_terms = set()
@@ -233,7 +227,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             break
 
                 if is_question:
-                    system_prompt = 'Responde solo JSON: {"advice":"info útil (máx 2 oraciones)","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["dato1","dato2"],"suggested_questions":[],"suggested_slide":null,"is_question":true,"qa_answer":"respuesta según el contenido"}'
+                    system_prompt = 'Eres un asistente de presentaciones. Devuelve SOLO JSON válido, sin texto adicional. Ejemplo: {"advice":"info útil","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["dato1","dato2"],"suggested_questions":[],"suggested_slide":null,"is_question":true,"qa_answer":"respuesta"}'
 
                     user_msg = json.dumps({
                         "slide_content": slide_content[:1000],
@@ -242,7 +236,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         "resultados_web": web_results,
                     })
                 else:
-                    system_prompt = 'Responde solo JSON: {"advice":"información relevante sobre este tema (máx 2 oraciones)","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["dato adicional 1","dato 2","dato 3"],"suggested_questions":["pregunta 1?","pregunta 2?"],"key_points_covered":[],"key_points_missed":[],"suggested_slide":null,"is_question":false,"qa_answer":null}'
+                    system_prompt = 'Eres un asistente de presentaciones. Devuelve SOLO JSON válido, sin texto adicional. Ejemplo: {"advice":"información relevante","slide_match":true,"off_topic":false,"confidence":0.9,"extra_info":["dato1","dato2"],"suggested_questions":["pregunta?"],"key_points_covered":[],"key_points_missed":[],"suggested_slide":null,"is_question":false,"qa_answer":null}'
 
                     all_summaries = [
                         f"Slide {s['number']}: {s['content'][:150]}"
@@ -265,12 +259,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_msg},
                         ],
+                        response_format={"type": "json_object"},
                         temperature=0.2,
                         max_tokens=200,
                     )
 
                     raw = completion.choices[0].message.content.strip()
-                    raw = raw.replace("```json", "").replace("```", "").strip()
                     result = json.loads(raw)
 
                     if result.get("suggested_slide") and isinstance(result["suggested_slide"], (int, float)):
