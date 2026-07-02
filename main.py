@@ -261,7 +261,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                         ],
                         response_format={"type": "json_object"},
                         temperature=0.2,
-                        max_tokens=200,
+                        max_tokens=500,
                     )
 
                     raw = completion.choices[0].message.content.strip()
