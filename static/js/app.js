@@ -23,6 +23,11 @@
   const confidenceFill = document.getElementById("confidence-fill");
 
   // Init
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.getRegistrations().then(function(regs) {
+      for (let reg of regs) reg.unregister();
+    });
+  }
   upload.init();
   speech.init();
 

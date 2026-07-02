@@ -125,7 +125,9 @@
 <script src="/js/app.js"></script>
 <script>
   if ("serviceWorker" in navigator) {
-    navigator.serviceWorker.register("/sw.js");
+    navigator.serviceWorker.getRegistrations().then(function(regs) {
+      for (let reg of regs) reg.unregister();
+    });
   }
 </script>
 </body>
